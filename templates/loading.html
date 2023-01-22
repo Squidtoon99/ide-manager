@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='loader.css') }}">
+</head>
+<body>
+    <div class="large-indicator">
+        <div></div>
+        <div></div>
+        <div></div>
+    </div>
+    <script>
+        window.onload = function () {
+            setInterval(function () {
+                fetch(window.location.href)
+                    .then(function (response) {
+                        // if the response is different from the current page
+                        // then reload the page
+                        if (response.status == 200 && response.headers.get("x-served-by") != "flask") {
+                            window.location.reload();
+                        } else {
+                            console.log(response.status, response.headers.get("x-served-by"));
+                        }
+                    });
+            }, 3000);
+        }
+    </script>
+</body>

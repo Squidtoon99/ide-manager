@@ -1,0 +1,11 @@
+*.sh
+*config.yml
+
+pylintrc
+
+*.env
+.vscode
+.idea
+.yarn*
+
+venv

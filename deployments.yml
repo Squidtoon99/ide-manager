@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vs-{user}-svc
+spec:
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+    - port: 3000
+      targetPort: fs
+      name: fs
+  selector:
+    app: vs-{user}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vs-{user}-demo
+  labels:
+    app: vs-{user}
+    type: ide
+spec:
+  selector:
+    matchLabels:
+      app: vs-{user}
+      type: ide
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: vs-{user} 
+        type: ide
+    spec:
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: init
+        image: busybox
+        # copy the vscode config from https://code.squid.pink/api/v1/arjun/config 
+      containers:
+      - name: server
+        image: squidtoon99/vs-java:1.4
+        imagePullPolicy: IfNotPresent
+        automountServiceAccountToken: false
+        args: ['--auth', 'none', '--extensions-dir', '/extensions'] # override default extensions dir b/c mount overrides it
+        resources:
+          requests:
+            memory: 256M
+          limits:
+            memory: 1G  
+        ports:
+        - name: http
+          containerPort: 8080
+        livenessProbe:
+          httpGet:
+            port: http
+            path: /healthz
+        readinessProbe:
+          httpGet:
+            port: http
+            path: /healthz
+        volumeMounts:
+        - mountPath: /home/coder
+          name: data
+      - name: idle-shutdown
+        image: busybox
+        # send a POST request to https://code.squid.pink with the json {"action": "stop"} if the heartbeat file hasn't been touched in 5 minutes
+        command: ["sh", "-c", "while true; do sleep 60; if [ $(($(date +%s) - $(date +%s -r /home/coder/.local/share/code-server/heartbeat))) -gt 60 ]; then wget -O- --post-data='{\"action\":\"stop\"}' --header='Content-Type:application/json' https://code.squid.pink/api/v1/arjun/; fi; done"]
+        volumeMounts:
+        - mountPath: /home/coder
+          name: data
+        resources:
+          requests:
+            memory: 100M
+          limits:
+            memory: 100M
+      - name: file-access
+        image: httpd
+        volumeMounts:
+        - mountPath: /usr/local/apache2/htdocs
+          name: data
+        resources:
+          requests:
+            memory: 32M
+          limits:
+            memory: 32M
+        ports:
+        - name: fs
+          containerPort: 80
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-pv-claim-{user}
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata: 
+  name: vs-{user}-ingress
+spec:
+  entryPoints: []
+  routes: #/app 
+  - kind: Rule
+    match: PathPrefix(`/app/{user}`) && HeadersRegexp(`Cookie`, `vs-{user}=.*`)
+    priority: 100
+    services:
+    - kind: Service
+      name: vs-{user}-svc
+      port: 8080
+    middlewares:
+      - name: app-stripprefix-{user}
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: app-stripprefix-{user}
+spec:
+  stripPrefix:
+    prefixes:
+      - /app/{user}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pv-claim-{user}
+spec:   
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+  storageClassName: standard-rwo

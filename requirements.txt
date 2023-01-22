@@ -1,0 +1,14 @@
+flask
+kubernetes
+gunicorn
+gevent
+wheel
+psycopg2
+Flask-SQLAlchemy
+Flask-Migrate
+flask-dance
+flask-login
+flask-restful
+flask-marshmallow
+flask-sqlalchemy
+marshmallow-sqlalchemy
