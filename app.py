@@ -62,7 +62,8 @@ app.register_blueprint(blueprint, url_prefix="/login")
 def b64_encode(data: str) -> str:
     return base64.urlsafe_b64encode(bytes(data, 'utf-8')).decode('utf-8')
 
-
+# Keeping this commented out in case I need it later (flask-login handles this automatically but I can optimize it for speed)
+# since data I have received from google is garunteed to be valid, I can skip the validation step
 # @oauth_authorized.connect_via(blueprint)
 # def google_logged_in(blueprint, token):
 #     if not token:
@@ -94,9 +95,9 @@ def b64_encode(data: str) -> str:
 
 
 @oauth_error.connect_via(blueprint)
-def google_error(blueprint, message, response):
+def google_error(blueprint_2, message, response):
     msg = "OAuth error from {name}! message={message} response={response}".format(
-        name=blueprint.name, message=message, response=response
+        name=blueprint_2.name, message=message, response=response
     )
     flash(msg, category="error")
 
@@ -115,7 +116,7 @@ def unauthorized():
 
 @login_manager.request_loader
 def loader(_request):
-    if google.authorized:
+    if google.authorized: # type: ignore # Google is a localProxy to a requests session
         try:
             resp = google.get("/oauth2/v2/userinfo")
         except TokenExpiredError:
@@ -136,7 +137,7 @@ def loader(_request):
     return None
 
 
-app.secret_key = "supersekrit"
+app.secret_key = os.getenv("SECRET_KEY", "supersekrit")
 
 app.register_blueprint(v1)
 
