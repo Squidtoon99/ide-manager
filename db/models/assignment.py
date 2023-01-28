@@ -11,3 +11,9 @@ class Assignment(db.Model):  # type: ignore
     is_published = db.Column(db.Boolean, nullable=False)
 
     projects = db.relationship('Project', back_populates="assignment")
+
+    course_id = db.Column(db.Integer, db.ForeignKey('courses.id'))
+    course = db.relationship('Course', back_populates="assignments")
+
+    unit_id = db.Column(db.Integer, db.ForeignKey('units.id'))
+    unit = db.relationship('Unit', back_populates="assignments")

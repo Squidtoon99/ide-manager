@@ -9,3 +9,5 @@ pylintrc
 .yarn*
 
 venv
+
+__pycache__

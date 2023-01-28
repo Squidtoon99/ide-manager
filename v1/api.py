@@ -1,12 +1,14 @@
-from db.models import User, School, Course, Assignment, Project, File
-from db.schemas import user_schema, school_schema, course_schema, assignment_schema, project_schema, file_schema
-from db.connection import db
-from flask import Blueprint, jsonify, request
 import re
 from typing import Union, Literal
+
+from flask import Blueprint, jsonify, request
+from flask_login import current_user
 from flask_login import login_required
 from flask_restful import Resource, Api
-# from .decorators import require_auth
+
+from db.connection import db
+from db.models import User, School, Course, Assignment, Project, File
+from db.schemas import user_schema, school_schema, course_schema, assignment_schema, project_schema, file_schema
 
 api = Api(prefix="/api/v1/", decorators=[login_required])
 
@@ -95,6 +97,17 @@ class UserResource(Resource):
         return user_schema.dump(user)
 
 
+class SelfResource(Resource):
+    def get(self):
+        return user_schema.dump(current_user)
+
+
+class CourseResource(Resource):
+    def get(self, course_id):
+        course = Course.query.get_or_404(course_id)
+        return course_schema.dump(course)
+
+
 class SchoolResource(Resource):
     def get(self, school_id):
         school = School.query.get_or_404(school_id)
@@ -102,9 +115,16 @@ class SchoolResource(Resource):
 
 
 class AssignmentResource(Resource):
-    def get(self, assignment_id):
-        assignment = Assignment.query.get_or_404(assignment_id)
+    def get(self, course_id, assignment_id):
+        assignment = Assignment.query.filter_by(
+            course_id=course_id, id=assignment_id).first_or_404()
         return assignment_schema.dump(assignment)
+
+
+class CourseAssignmentsResource(Resource):
+    def get(self, course_id: int):
+        assignments = Assignment.query.filter_by(course_id=course_id).all()
+        return assignment_schema.dump(assignments, many=True)
 
 
 class ProjectResource(Resource):
@@ -120,11 +140,17 @@ class FileResource(Resource):
 
 
 api.add_resource(UserResource, '/users/<int:user_id>')
+api.add_resource(SelfResource, '/users/@me')
+
+api.add_resource(CourseResource, '/courses/<int:course_id>')
+api.add_resource(CourseAssignmentsResource,
+                 '/courses/<int:course_id>/assignments')
+
+api.add_resource(AssignmentResource,
+                 '/courses/<int:course_id>/assignments/<int:assignment_id>')
 
 api.add_resource(SchoolResource, '/schools/<int:school_id>')
 
-api.add_resource(AssignmentResource, '/assignments/<int:assignment_id>')
-
-api.add_resource(ProjectResource, '/projects/<int>')
+api.add_resource(ProjectResource, '/projects/<int:project_id>')
 
 api.add_resource(FileResource, '/files/<int:file_id>')

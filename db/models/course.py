@@ -1,5 +1,5 @@
-from ..connection import db
 from .course_users import course_users
+from ..connection import db
 
 
 class Course(db.Model):  # type: ignore
@@ -11,7 +11,14 @@ class Course(db.Model):  # type: ignore
     join_code = db.Column(db.String(20), nullable=False, unique=True)
 
     users = db.relationship("User", secondary=course_users,
-                         back_populates="courses", lazy="joined")
+                            back_populates="courses", lazy="joined")
+
+    featured_teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    featured_teacher = db.relationship("User", back_populates="featured_courses")
 
     school_id = db.Column(db.Integer, db.ForeignKey('schools.id'))
     school = db.relationship("School", back_populates="courses")
+
+    assignments = db.relationship("Assignment", back_populates="course")
+    
+    units = db.relationship("Unit", back_populates="course")

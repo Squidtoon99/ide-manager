@@ -8,3 +8,5 @@ class School(db.Model):  # type: ignore
 
     courses = db.relationship('Course', back_populates="school")
     users = db.relationship("User", back_populates="school")
+    
+    units = db.relationship('Unit', back_populates='school')

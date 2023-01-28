@@ -3,25 +3,28 @@ Webserver to abstract creation and deletion of ide deployments
 
 * WARNING: this release of kubernetes.client requires python 3.9+
 """
+import base64
 import json
 import os
 
 import yaml
-from flask import Flask, jsonify, make_response, render_template, request, redirect, url_for
-from flask_migrate import Migrate
-from flask_login import LoginManager, login_required, logout_user
+from flask import Flask, jsonify, make_response, render_template, request, redirect, url_for, flash
+from flask_dance.consumer import oauth_error
+from flask_dance.consumer.storage.sqla import SQLAlchemyStorage
 from flask_dance.contrib.google import make_google_blueprint, google
-from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
-import base64
+from flask_login import LoginManager, login_required, logout_user
+from flask_migrate import Migrate
 from kubernetes import config, dynamic
 from kubernetes.client import Configuration, api_client
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
-from db.models import Course, School, User, Assignment, Project
-from db.connection import db, ma
+from oauthlib.oauth2 import TokenExpiredError
 
+from db.connection import db, ma
+from db.models import User, OAuth
 from v1 import bp as v1
 from v1.api import api
+
 # wow
 print("Hello World :D")
 
@@ -29,6 +32,7 @@ print("Hello World :D")
 try:
     # noinspection PyUnresolvedReferences
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -48,16 +52,9 @@ api.init_app(app)
 blueprint = make_google_blueprint(
     client_id=os.environ['GOOGLE_CLIENT_ID'],
     client_secret=os.environ['GOOGLE_CLIENT_SECRET'],
-    scope=["profile", "email"]
+    scope=["profile", "email"],
+    storage=SQLAlchemyStorage(OAuth, db.session)
 )
-
-
-class OAuth(OAuthConsumerMixin, db.Model):  # type: ignore
-    pass
-
-
-blueprint.storage = SQLAlchemyStorage(OAuth, db.session)
-
 
 app.register_blueprint(blueprint, url_prefix="/login")
 
@@ -66,9 +63,46 @@ def b64_encode(data: str) -> str:
     return base64.urlsafe_b64encode(bytes(data, 'utf-8')).decode('utf-8')
 
 
+# @oauth_authorized.connect_via(blueprint)
+# def google_logged_in(blueprint, token):
+#     if not token:
+#         flash("Failed to log in.", category="error")
+#
+#     resp = blueprint.session.get("/oauth2/v2/userinfo")
+#     if not resp.ok:
+#         msg = "Failed to fetch user info."
+#         flash(msg, category="error")
+#         return False
+#
+#     info = resp.json()
+#
+#     oauth = OAuth.query.filter_by(provider=blueprint.name, provider_email=info["email"]).first()
+#     if oauth is None:
+#         oauth = OAuth(provider=blueprint.name, provider_email=info["email"], token=token)
+#
+#     if not oauth.user:
+#         user = select(User).where(User.email == info["email"]).scalar()
+#         if user is None:
+#             user = User(email=info["email"], name=info["name"], image=info["picture"])
+#         oauth.user = user
+#         db.session.add_all([oauth, user])
+#         db.session.commit()
+#         flash("Successfully signed in.")
+#
+#     login_user(oauth.user)
+#     return False
+
+
+@oauth_error.connect_via(blueprint)
+def google_error(blueprint, message, response):
+    msg = "OAuth error from {name}! message={message} response={response}".format(
+        name=blueprint.name, message=message, response=response
+    )
+    flash(msg, category="error")
+
+
 @login_manager.user_loader
 def load_user(user_id):
-    print("loading user %s" % user_id)
     return User.query.get(int(user_id))
 
 
@@ -78,10 +112,30 @@ def unauthorized():
     return make_response(jsonify({"error": "Unauthorized"}), 401)
     # return redirect(url_for("google.login", state=b64_encode(request.url)))
 
+
 @login_manager.request_loader
-def loader(request):
+def loader(_request):
     if google.authorized:
-        ... # TODO: FINISH
+        try:
+            resp = google.get("/oauth2/v2/userinfo")
+        except TokenExpiredError:
+            return None
+        assert resp.ok, resp.text
+        profile = resp.json()
+        user = User.query.filter_by(email=profile["email"]).first()
+        if user is None:
+            user = User(
+                name=profile["name"],
+                email=profile["email"],
+                image=profile["picture"],
+                is_teacher=False
+            )
+            db.session.add(user)
+            db.session.commit()
+        return user
+    return None
+
+
 app.secret_key = "supersekrit"
 
 app.register_blueprint(v1)
@@ -91,7 +145,6 @@ try:
 except ConfigException:
     config.load_kube_config(config_file=os.path.join(
         os.path.dirname(__file__), 'kubeconfig.yml'))
-
 
 k8s_config = Configuration().get_default_copy()
 
@@ -200,7 +253,7 @@ class Deployment(object):
 d = Deployment("server")
 
 
-@ app.route("/api/v1/@me")
+@app.route("/api/v1/@me")
 def http_from_headers():
     # read the cookie formatted vs-{user}=.+; from the request headers
     cookies = request.headers.get('Cookie')
@@ -212,7 +265,7 @@ def http_from_headers():
     return jsonify({"status": "not found", "availableReplicas": 0, "readyReplicas": 0, "replicas": 0}), 404
 
 
-@ app.route('/api/v1/<deployment>/', methods=['POST', 'GET', 'DELETE'])
+@app.route('/api/v1/<deployment>/', methods=['POST', 'GET', 'DELETE'])
 def http_status(deployment: str):
     """
     Get the status of a deployment
@@ -246,7 +299,7 @@ def is_valid(deployment: str):
     return deployment in ['server', 'arjun']
 
 
-@ app.route("/app/<deployment>/", methods=['GET'])
+@app.route("/app/<deployment>/", methods=['GET'])
 def cold_boot(deployment):
     if not is_valid(deployment):
         return jsonify({"error": "invalid deployment"}), 400
@@ -264,7 +317,7 @@ def index():
     return "Hello World 👋"
 
 
-@ app.route("/login", methods=['GET'])
+@app.route("/login", methods=['GET'])
 def login():
     return redirect(url_for('google.login'))
 
@@ -278,4 +331,4 @@ def logout():
 
 # this is the actual debugging statement
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(debug=False, port=8000)

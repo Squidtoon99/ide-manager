@@ -10,5 +10,5 @@ flask-dance
 flask-login
 flask-restful
 flask-marshmallow
-flask-sqlalchemy
 marshmallow-sqlalchemy
+blinker

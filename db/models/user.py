@@ -13,8 +13,25 @@ class User(db.Model):  # type: ignore
     is_teacher = db.Column(db.Boolean, nullable=False)
 
     courses = db.relationship('Course', secondary=course_users,
-                           back_populates="users", lazy="joined")
+                              back_populates="users", lazy="joined")
 
     school = db.relationship("School", back_populates="users", lazy="joined")
     school_id = db.Column(db.Integer, db.ForeignKey('schools.id'))
     projects = db.relationship("Project", back_populates="user", lazy="joined")
+
+    featured_courses = db.relationship("Course", back_populates="featured_teacher", lazy="joined")
+
+    @staticmethod
+    def get(user_id):
+        return User.query.get(user_id)
+
+    def get_id(self):
+        return self.id
+
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_active(self):
+        return True
