@@ -86,55 +86,66 @@ def create_user(_id: int):
 
 
 class UserResource(Resource):
-    def get(self, user_id):
+    @staticmethod
+    def get(user_id):
         user = User.query.get_or_404(user_id)
         return user_schema.dump(user)
 
-    def delete(self, user_id):
+    @staticmethod
+    def delete(user_id):
         user = User.query.get_or_404(user_id)
         db.session.delete(user)
         db.session.commit()
         return user_schema.dump(user)
 
 
+def get():
+    return user_schema.dump(current_user)
+
+
 class SelfResource(Resource):
-    def get(self):
-        return user_schema.dump(current_user)
+    pass
 
 
 class CourseResource(Resource):
-    def get(self, course_id):
+    @staticmethod
+    def get(course_id):
         course = Course.query.get_or_404(course_id)
         return course_schema.dump(course)
 
 
 class SchoolResource(Resource):
-    def get(self, school_id):
+    @staticmethod
+    def get(school_id):
         school = School.query.get_or_404(school_id)
         return school_schema.dump(school)
 
 
 class AssignmentResource(Resource):
-    def get(self, course_id, assignment_id):
+    @staticmethod
+    def get(course_id, assignment_id):
         assignment = Assignment.query.filter_by(
             course_id=course_id, id=assignment_id).first_or_404()
         return assignment_schema.dump(assignment)
 
 
 class CourseAssignmentsResource(Resource):
-    def get(self, course_id: int):
+    @staticmethod
+    def get(course_id: int):
         assignments = Assignment.query.filter_by(course_id=course_id).all()
         return assignment_schema.dump(assignments, many=True)
 
 
 class ProjectResource(Resource):
-    def get(self, project_id):
+    @staticmethod
+    def get(project_id):
         project = Project.query.get_or_404(project_id)
         return project_schema.dump(project)
 
 
 class FileResource(Resource):
-    def get(self, file_id):
+    @staticmethod
+    def get(file_id):
         file = File.query.get_or_404(file_id)
         return file_schema.dump(file)
 

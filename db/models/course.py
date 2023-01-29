@@ -20,5 +20,5 @@ class Course(db.Model):  # type: ignore
     school = db.relationship("School", back_populates="courses")
 
     assignments = db.relationship("Assignment", back_populates="course")
-    
+
     units = db.relationship("Unit", back_populates="course")

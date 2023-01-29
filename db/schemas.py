@@ -15,6 +15,7 @@ class AssignmentSchema(ma.SQLAlchemyAutoSchema):
 
 assignment_schema = AssignmentSchema()
 
+
 class UnitSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
         model = Unit
@@ -22,7 +23,9 @@ class UnitSchema(ma.SQLAlchemyAutoSchema):
         load_instance = True
         include_fk = True
 
+
 unit_schema = UnitSchema()
+
 
 class CourseSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
@@ -33,6 +36,7 @@ class CourseSchema(ma.SQLAlchemyAutoSchema):
 
     featured_teacher = ma.Nested("UserSchema", only=("id", "name", "email", "image"))
     units = ma.Nested("UnitSchema", only=("id", "name", "description"), many=True)
+
 
 course_schema = CourseSchema()
 

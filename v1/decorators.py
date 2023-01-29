@@ -1,7 +1,8 @@
-from functools import wraps
-from flask import redirect, url_for, jsonify
-from flask_dance.contrib.google import google
 from functools import lru_cache
+from functools import wraps
+
+from flask import jsonify
+from flask_dance.contrib.google import google
 
 
 @lru_cache(maxsize=100)
@@ -16,9 +17,10 @@ def require_auth(f):
     @wraps(f)
     def decorator(*args, **kw):
         try:
-            assert google.authorized and google.token   # type: ignore
+            assert google.authorized and google.token  # type: ignore
             resp = _user(google.token['access_token'])  # type: ignore
         except AssertionError:
             return jsonify({"error": "not authorized"}), 401
         return f(resp, *args, **kw)
+
     return decorator

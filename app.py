@@ -62,12 +62,11 @@ app.register_blueprint(blueprint, url_prefix="/login")
 def b64_encode(data: str) -> str:
     return base64.urlsafe_b64encode(bytes(data, 'utf-8')).decode('utf-8')
 
-# Keeping this commented out in case I need it later (flask-login handles this automatically but I can optimize it for speed)
-# since data I have received from google is garunteed to be valid, I can skip the validation step
-# @oauth_authorized.connect_via(blueprint)
-# def google_logged_in(blueprint, token):
-#     if not token:
-#         flash("Failed to log in.", category="error")
+
+# Keeping this commented out in case I need it later (flask-login handles this automatically, but I can optimize it
+# for speed) since data I have received from Google is guaranteed to be valid, I can skip the validation step
+# @oauth_authorized.connect_via(blueprint) def google_logged_in(blueprint, token): if not token: flash("Failed to log
+# in.", category="error")
 #
 #     resp = blueprint.session.get("/oauth2/v2/userinfo")
 #     if not resp.ok:
@@ -116,7 +115,7 @@ def unauthorized():
 
 @login_manager.request_loader
 def loader(_request):
-    if google.authorized: # type: ignore # Google is a localProxy to a requests session
+    if google.authorized:  # type: ignore # Google is a localProxy to a requests session
         try:
             resp = google.get("/oauth2/v2/userinfo")
         except TokenExpiredError:
@@ -161,8 +160,7 @@ class Deployment(object):
 
     def __init__(self, name: str):
         assert "{" not in name and "}" not in name  # prevent injection
-        self.api = client.resources.get(
-            api_version="apps/v1", kind="Deployment")
+        self.api = client.resources
         self.name = name
         self.deployments = {}
         self.setup()
@@ -217,15 +215,15 @@ class Deployment(object):
         else:
             # Create all in deployments
             for dep in self.deployments.values():
-                api = client.resources.get(
+                api_proxy = client.resources.get(
                     api_version=dep['apiVersion'], kind=dep['kind'])
-                api.create(body=dep, namespace='default')
+                api_proxy.create(body=dep, namespace='default')
                 created.append(str(dep['kind']))
         return {"status": "starting", "created": created}
 
     def stop(self):
         # Stop the pod by scaling to 0
-        if (deployment := self.deployment()) is None:
+        if self.deployment() is None:
             return {"status": "stopped"}  # Can't stop if it's not running
 
         if (deployment := self.deployments.get("Deployment")) is not None:
@@ -240,13 +238,12 @@ class Deployment(object):
         for resource in self.deployments.values():
             # Check if resource exists
             try:
-                api = client.resources.get(
-                    api_version=resource['apiVersion'], kind=resource['kind'])
+                api_proxy = client.resources
             except ApiException:
                 continue
             name = resource['metadata']['name']
-            if api.get(name=name, namespace='default') is not None:
-                api.delete(name=name, namespace='default')
+            if api_proxy.get(name=name, namespace='default') is not None:
+                api_proxy.delete(name=name, namespace='default')
                 deleted.append(str(resource['kind']))
         return {"status": "deleted", "deleted": deleted}
 

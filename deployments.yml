@@ -63,31 +63,6 @@ spec:
         volumeMounts:
         - mountPath: /home/coder
           name: data
-      - name: idle-shutdown
-        image: busybox
-        # send a POST request to https://code.squid.pink with the json {"action": "stop"} if the heartbeat file hasn't been touched in 5 minutes
-        command: ["sh", "-c", "while true; do sleep 60; if [ $(($(date +%s) - $(date +%s -r /home/coder/.local/share/code-server/heartbeat))) -gt 60 ]; then wget -O- --post-data='{\"action\":\"stop\"}' --header='Content-Type:application/json' https://code.squid.pink/api/v1/arjun/; fi; done"]
-        volumeMounts:
-        - mountPath: /home/coder
-          name: data
-        resources:
-          requests:
-            memory: 100M
-          limits:
-            memory: 100M
-      - name: file-access
-        image: squidtoon99/tiny-fs:1.0
-        volumeMounts:
-        - mountPath: /home/coder
-          name: data
-        resources:
-          requests:
-            memory: 32M
-          limits:
-            memory: 32M
-        ports:
-        - name: fs
-          containerPort: 80
       volumes:
       - name: data
         persistentVolumeClaim:
