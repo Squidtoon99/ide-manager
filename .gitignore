@@ -1,6 +1,6 @@
 *.sh
 *config.yml
-
+*.json
 pylintrc
 
 *.env

@@ -1,21 +1,43 @@
 import re
+from functools import wraps
+from os import getenv
 from typing import Union, Literal
+from urllib.parse import urlencode
 
-from flask import Blueprint, jsonify, request
-from flask_login import current_user
-from flask_login import login_required
+import requests
+from flask import Blueprint, jsonify, request, current_app
+from flask_login import login_required, current_user
 from flask_restful import Resource, Api
 
 from db.connection import db
-from db.models import User, School, Course, Assignment, Project, File
-from db.schemas import user_schema, school_schema, course_schema, assignment_schema, project_schema, file_schema
+from db.models import User, School, Course, Assignment, Project, File, Unit
+from db.schemas import user_schema, school_schema, course_schema, assignment_schema, project_schema, file_schema, \
+    unit_schema
+from .deployment import Deployment
+
+
+def revalidate_path(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        data = current_app.ensure_sync(func)(*args, **kwargs)
+        if path := request.headers.get('X-Forwarded-Path'):
+            try:
+                requests.get(request.host_url +
+                             f"/cache/revalidate?secret={getenv('SECRET_KEY')}&path={urlencode(path)}",
+                             timeout=1)
+            except requests.exceptions.ReadTimeout:
+                pass
+        return data
+
+    return wrapper
+
 
 api = Api(prefix="/api/v1/", decorators=[login_required])
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1',
                template_folder='templates')
 
-VALID_NAME = re.compile(r'^[a-zA-Z0-9_]+$')
+VALID_NAME = re.compile(r'^\w+$')
 VALID_EMAIL = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
 VALID_IMAGE = re.compile(r'^https?://.+')
 
@@ -85,6 +107,8 @@ def create_user(_id: int):
         return jsonify({'error': 'invalid data'}), 400
 
 
+# SQLAlchemy Resources
+
 class UserResource(Resource):
     @staticmethod
     def get(user_id):
@@ -99,12 +123,10 @@ class UserResource(Resource):
         return user_schema.dump(user)
 
 
-def get():
-    return user_schema.dump(current_user)
-
-
 class SelfResource(Resource):
-    pass
+    @staticmethod
+    def get():
+        return user_schema.dump(current_user)
 
 
 class CourseResource(Resource):
@@ -136,6 +158,59 @@ class CourseAssignmentsResource(Resource):
         return assignment_schema.dump(assignments, many=True)
 
 
+class UnitResource(Resource):
+    @staticmethod
+    def get(course_id, unit_id):
+        unit = Unit.query.filter_by(course_id=course_id, id=unit_id).first_or_404()
+        return unit_schema.dump(unit)
+
+    @staticmethod
+    def delete(course_id, unit_id):
+        unit = Unit.query.filter_by(course_id=course_id, id=unit_id).first_or_404()
+        db.session.delete(unit)
+        db.session.commit()
+        return unit_schema.dump(unit)
+
+    @staticmethod
+    def put(course_id, unit_id):
+        data = request.json or {}
+        unit = Unit.query.filter_by(course_id=course_id, id=unit_id).first_or_404()
+        for key, value in data.items():
+            setattr(unit, key, value)
+        db.session.commit()
+        return unit_schema.dump(unit)
+
+
+class UnitListResource(Resource):
+    @staticmethod
+    def get(course_id):
+        units = Unit.query.filter_by(course_id=course_id).all()
+        return unit_schema.dump(units, many=True)
+
+    @staticmethod
+    def delete(course_id):
+        units = Unit.query.filter_by(course_id=course_id).all()
+        for unit in units:
+            db.session.delete(unit)
+        db.session.commit()
+        return unit_schema.dump(units, many=True)
+
+    @staticmethod
+    def post(course_id):
+        data = request.json or {}
+        if data.get('id'):
+            del data['id']
+
+        if len(data.get("name", "")) == 0 or len(data.get("name", "")) > 100:
+            return jsonify({'error': 'invalid data'}), 400
+        data['course_id'] = course_id
+
+        unit = Unit(**data)
+        db.session.add(unit)
+        db.session.commit()
+        return unit_schema.dump(unit)
+
+
 class ProjectResource(Resource):
     @staticmethod
     def get(project_id):
@@ -146,8 +221,27 @@ class ProjectResource(Resource):
 class FileResource(Resource):
     @staticmethod
     def get(file_id):
-        file = File.query.get_or_404(file_id)
-        return file_schema.dump(file)
+        f = File.query.get_or_404(file_id)
+        return file_schema.dump(f)
+
+
+class QuickDeployResource(Resource):
+    @staticmethod
+    def get(course_id, assignment_id):
+        u_id = current_user.id
+        assignment = Assignment.query.filter_by(
+            course_id=course_id, id=assignment_id).first_or_404()
+        project = Project.query.filter_by(
+            assignment_id=assignment_id, user_id=u_id, blueprint=False).first()
+
+        d = Deployment()
+
+        deployment_data = d.get(current_user.id)
+        if not deployment_data:
+            return d.start(current_user.id)
+        if not project:
+            project = Project.initialize(assignment=assignment, user=current_user)
+        return project_schema.dump(project)
 
 
 api.add_resource(UserResource, '/users/<int:user_id>')
@@ -164,4 +258,11 @@ api.add_resource(SchoolResource, '/schools/<int:school_id>')
 
 api.add_resource(ProjectResource, '/projects/<int:project_id>')
 
+api.add_resource(UnitResource, '/courses/<int:course_id>/units/<int:unit_id>')
+api.add_resource(UnitListResource, '/courses/<int:course_id>/units')
+
 api.add_resource(FileResource, '/files/<int:file_id>')
+
+api.add_resource(Deployment, '/deployments/<deployment_id>')
+
+api.add_resource(QuickDeployResource, "/apps/quick-deploy/<int:course_id>/<int:assignment_id>")

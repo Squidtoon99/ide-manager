@@ -35,7 +35,7 @@ class CourseSchema(ma.SQLAlchemyAutoSchema):
         include_relationships = True
 
     featured_teacher = ma.Nested("UserSchema", only=("id", "name", "email", "image"))
-    units = ma.Nested("UnitSchema", only=("id", "name", "description"), many=True)
+    units = ma.Nested("UnitSchema", only=("id", "name"), many=True)
 
 
 course_schema = CourseSchema()
