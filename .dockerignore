@@ -1,2 +1,3 @@
 venv
 v1/k8s/kubeconfig.yml
+sa-private-key.json

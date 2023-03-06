@@ -22,45 +22,47 @@ api_client = api_client.ApiClient(configuration=k8s_config)
 client = dynamic.DynamicClient(
     api_client
 )
-api = client.resources.get(api_version='apps/v1', kind='Deployment')
+api = client.resources.get(api_version='apps/v1', kind='StatefulSet')
 
 
-class Deployment(Resource):
+class StatefulSet(Resource):
     _id: str
     with open(os.path.join(os.path.dirname(__file__), 'k8s', 'deployments.yml'), 'r') as f:
         MANIFEST = list(yaml.safe_load_all(f))
 
-    def setup(self, _id):
+    def setup(self, _id, *, token=None):
         deployments = {}
+
+        def fmt_fn(s):
+            return str(s).format(
+                user=_id,
+                token=token or os.urandom(16).hex()
+            )
+
         for i in self.MANIFEST:
             x = {}
-            self.fmt(i, x, _id)
+
+            self.fmt(i, x, fmt_fn)
             deployments[x['kind']] = x
         return deployments
 
-    def fmt(self, src, dest, _id):
-        def replace(i_rep: str):
-
-            session = request.cookies.get('session')
-            return i_rep.replace("{user}", _id).replace("{session}", session)
-
-        _id = str(_id)
+    def fmt(self, src, dest, fn):
         for k, v in src.items():
             if isinstance(v, dict):
                 dest[k] = {}
-                self.fmt(v, dest[k], _id)
+                self.fmt(v, dest[k], fn)
             elif isinstance(v, list):
                 dest[k] = []
                 for i in v:
                     if isinstance(i, dict):
                         dest[k].append({})
-                        self.fmt(i, dest[k][-1], _id)
+                        self.fmt(i, dest[k][-1], fn)
                     else:
                         if isinstance(i, str):
-                            i = replace(i)
+                            i = fn(i)
                         dest[k].append(i)
             elif isinstance(v, str):
-                dest[k] = replace(v)
+                dest[k] = fn(v)
             else:
                 dest[k] = v
 
@@ -71,15 +73,20 @@ class Deployment(Resource):
         except ApiException:
             return None
 
-    def start(self, _id):
+    def start(self, _id, *, _local=False):
         # check if the deployment already exists if so scale it to 1 pod, otherwise create it
         created = []
         deployments = self.setup(_id)
-        if self.deployment(_id) is not None:
-            deployment = deployments.get("Deployment")
+        if (dep := self.deployment(_id)) is not None:
+            if dep.status.readyReplicas == 1:
+                d = {"status": "running"}
+                if _local:
+                    d['dep'] = dep
+                return d
+            deployment = deployments.get("StatefulSet")
             api.patch(name=f'vs-{_id}-demo',
                       namespace='default', body=deployment)
-            created = ['Deployment']
+            created = ['StatefulSet']
         else:
             # Create all in deployments
             for dep in deployments.values():
@@ -94,14 +101,14 @@ class Deployment(Resource):
         if self.deployment(_id) is None:
             return {"status": "stopped"}  # Can't stop if it's not running
         deployments = self.setup(_id)
-        if (deployment := deployments.get("Deployment")) is not None:
+        if (deployment := deployments.get("StatefulSet")) is not None:
             deployment['spec']['replicas'] = 0
-            api.patch(name=f'vs-{self._id}-demo',
+            api.patch(name=f'vs-{_id}-demo',
                       namespace='default', body=deployment)
             return {"status": "stopped"}
 
     def get(self, deployment_id):
-        print(deployment_id)
+        print("DEP ID: ", deployment_id)
         if deployment := self.deployment(deployment_id):
             return json.loads(json.dumps(dict(iter(deployment.status)), default=lambda o: o.__dict__))
         return None
@@ -117,6 +124,15 @@ class Deployment(Resource):
             return self.delete(deployment_id)
         else:
             return jsonify({"status": "error", "error": "invalid action"})
+
+    @staticmethod
+    def patch(resource, namespace='default'):
+        name = resource['metadata']['name']
+        api_proxy = client.resources.get(
+            api_version=resource['apiVersion'], kind=resource['kind'])
+
+        return api_proxy.patch(name=name, namespace=namespace, body=resource, content_type="application/merge-patch"
+                                                                                           "+json")
 
     def put(self, deployment_id):
         # Update the deployment
@@ -161,3 +177,21 @@ class Deployment(Resource):
                 deleted.append(str(resource['kind']))
         print(deleted)
         return jsonify({"status": "deleted", "deleted": deleted})
+
+    @classmethod
+    def get_deployments(cls):
+        deployments = []
+        for deployment in api.get(namespace='default').items:
+            print("deployment: ", deployment.metadata.name)
+            if deployment.metadata.name.startswith("vs-"):
+                deployments.append(deployment)
+        return deployments  
+
+    def set_token(self, id, token):
+        deployments = self.setup(id, token=token)
+        deployment = deployments.get("IngressRoute")
+        deployment['spec']['routes'][0][
+            'match'] = f'PathPrefix(`/app/{id}`)'
+        # deployment['spec']['routes'][0][
+        #     'match'] = f'PathPrefix(`/app/{id}`) && HeadersRegexp(`Cookie`, `proxy-token-{current_user.id}={token};`)'
+        self.patch(deployment, namespace='default')

@@ -18,7 +18,7 @@ class User(db.Model):  # type: ignore
     school = db.relationship("School", back_populates="users", lazy="joined")
     school_id = db.Column(db.Integer, db.ForeignKey('schools.id'))
     projects = db.relationship("Project", back_populates="user", lazy="joined")
-
+    files = db.relationship("File", back_populates="user", lazy="joined")
     featured_courses = db.relationship("Course", back_populates="featured_teacher", lazy="joined")
 
     @staticmethod

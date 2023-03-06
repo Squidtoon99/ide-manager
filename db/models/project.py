@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING
 
-import requests
 from flask_login import current_user
 
 from . import File
@@ -36,7 +35,7 @@ class Project(db.Model):  # type: ignore
         return f"Project {self.name} {self.slug} {self.description} {self.due_date} {self.is_published}"
 
     @classmethod
-    def create_blueprint(cls, assignment: "Assignment", user: "User") -> "Project":
+    def create_blueprint(cls, assignment: "Assignment", user: "User", files: list["File"]) -> "Project":
         project = cls(
             fs_path=f"{assignment.name}-{assignment.id}",
             is_published=False,
@@ -44,6 +43,9 @@ class Project(db.Model):  # type: ignore
             user=user,
             blueprint=True,
         )
+
+        for f in files:
+            project.attach_file(f)
 
         db.session.add(project)
         return project
@@ -65,21 +67,13 @@ class Project(db.Model):  # type: ignore
 
         files = []
         for f in blueprint.files:
-            files.append(project.create_file(f))
+            files.append(project.attach_file(f))
 
         db.session.add_all([project, *files])
         db.session.commit()
         return project
 
-    def create_file(self, file: "File") -> "File":
-        f = File(name=file.name, object=file.object, project=self)
+    def attach_file(self, file: "File") -> "File":
+        f = File(name=file.name, object=file.object, project=self, user=current_user, sync=False)
 
-        r = requests.post(
-            f"http://vs-{current_user.id}-svc.default.svc.cluster.local:3000/save",
-            json={
-                "path": f"{self.fs_path}/{f.name}",
-                "url": f"https://storage.googleapis.com/{f.object}"
-            }
-        )
-        print(r.text, r.status_code)
         return f
