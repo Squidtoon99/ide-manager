@@ -1,56 +1,17 @@
 import re
-from functools import wraps
-from os import getenv
 from typing import Union, Literal
-from urllib.parse import urlencode
 
-import requests
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
-from flask_restful import Resource, Api
+from flask_restful import Resource, Api, abort
 
-from db.connection import db
+from db.connection import db, ma
 from db.models import User, School, Course, Assignment, Project, File, Unit
 from db.schemas import user_schema, school_schema, course_schema, assignment_schema, project_schema, file_schema, \
     unit_schema
 from .statefulset import StatefulSet
 
-
-def revalidate_path(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        data = current_app.ensure_sync(func)(*args, **kwargs)
-        if path := request.headers.get('X-Forwarded-Path'):
-            try:
-                requests.get(request.host_url +
-                             f"/cache/revalidate?secret={getenv('SECRET_KEY')}&path={urlencode(path)}",
-                             timeout=1)
-            except requests.exceptions.ReadTimeout:
-                pass
-        return data
-
-    return wrapper
-
-
-def better_login_required(func):
-    secure = login_required(func)
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not current_user.is_authenticated and (auth := request.headers.get('Authorization')):
-            try:
-                user_id, secret = auth.split(":")
-                user = User.query.get(user_id)
-                if user and user.secret == secret:
-                    return func(*args, **kwargs)
-            except ValueError:
-                pass
-        return secure(*args, **kwargs)
-
-    return wrapper
-
-
-api = Api(prefix="/api/v1/", decorators=[better_login_required])
+api = Api(prefix="/api/v1/", decorators=[login_required])
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1',
                template_folder='templates')
@@ -76,22 +37,6 @@ User {
 @bp.route("/users/@me")
 @login_required
 def user_profile(user):
-    return jsonify(user)
-
-
-@bp.route('/users/<_id>', methods=['GET'])
-@login_required
-def get_user(auth, _id: int):
-    print(auth)
-    user = User.query.get(_id)
-    return jsonify(user)
-
-
-@bp.route('/users/<_id>', methods=['DELETE'])
-def delete_user(_id: int):
-    user = User.query.get(_id)
-    db.session.delete(user)
-    db.session.commit()
     return jsonify(user)
 
 
@@ -122,7 +67,7 @@ def create_user(_id: int):
         db.session.commit()
         return jsonify(user)
     else:
-        return jsonify({'error': 'invalid data'}), 400
+        abort(400)
 
 
 # SQLAlchemy Resources
@@ -151,6 +96,8 @@ class CourseResource(Resource):
     @staticmethod
     def get(course_id):
         course = Course.query.get_or_404(course_id)
+        if course.school_id != current_user.school_id:
+            abort(403)
         return course_schema.dump(course)
 
 
@@ -158,6 +105,8 @@ class SchoolResource(Resource):
     @staticmethod
     def get(school_id):
         school = School.query.get_or_404(school_id)
+        if school.id != current_user.school_id:
+            abort(403)
         return school_schema.dump(school)
 
 
@@ -167,6 +116,16 @@ class AssignmentResource(Resource):
         assignment = Assignment.query.filter_by(
             course_id=course_id, id=assignment_id).first_or_404()
         return assignment_schema.dump(assignment)
+
+    @staticmethod
+    def delete(course_id, assignment_id):
+        assignment = Assignment.query.filter_by(
+            course_id=course_id, id=assignment_id).first_or_404()
+        data = assignment_schema.dump(assignment)
+
+        db.session.delete(assignment)
+        db.session.commit()
+        return data
 
 
 class AssignmentResourceCreator(Resource):
@@ -182,6 +141,7 @@ class AssignmentResourceCreator(Resource):
         data.setdefault('course_id', course_id)
         if data.get('course_id') != course_id:
             return {'error': 'invalid course id'}, 400
+        current_app.logger.info("Creating assignment: %s", data)
         assignment = Assignment.initialize(**data)
         db.session.add(assignment)
         db.session.commit()
@@ -193,6 +153,28 @@ class CourseAssignmentsResource(Resource):
     def get(course_id: int):
         assignments = Assignment.query.filter_by(course_id=course_id).all()
         return assignment_schema.dump(assignments, many=True)
+
+
+class CourseJoinResource(Resource):
+    @staticmethod
+    def post():
+        code = request.json.get('code')
+        if not code:
+            return {'error': 'invalid code'}, 400
+
+        course = Course.query.filter_by(join_code=code).first()
+        if not course:
+            return {'error': 'invalid code'}, 400
+
+        if course.school_id != current_user.school_id:
+            return {'error': 'invalid code'}, 400
+
+        if course in current_user.courses:
+            return {'error': 'already joined'}, 400
+
+        current_user.courses.append(course)
+        db.session.commit()
+        return course_schema.dump(course)
 
 
 class UnitResource(Resource):
@@ -239,9 +221,10 @@ class UnitListResource(Resource):
             del data['id']
 
         if len(data.get("name", "")) == 0 or len(data.get("name", "")) > 100:
-            return jsonify({'error': 'invalid data'}), 400
+            abort(400)
         data['course_id'] = course_id
 
+        current_app.logger.info("Creating unit: %s", data)
         unit = Unit(**data)
         db.session.add(unit)
         db.session.commit()
@@ -262,7 +245,8 @@ class UserProjectsResource(Resource):
             user_id = current_user.id
         else:
             if not user_id.isdigit():
-                return jsonify({'error': 'invalid data'}), 400
+                current_app.logger.warning("Invalid user id: %s", user_id)
+                abort(400)
             user_id = int(user_id)
         projects = Project.query.filter_by(user_id=user_id).all()
         return project_schema.dump(projects, many=True)
@@ -282,43 +266,53 @@ class QuickDeployResource(Resource):
         assignment = Assignment.query.filter_by(
             course_id=course_id, id=assignment_id).first_or_404()
         project = Project.query.filter_by(
-            assignment_id=assignment_id, user_id=u_id, blueprint=False).first()
+            assignment_id=assignment_id, user_id=u_id).first()
 
         d = StatefulSet()
-        print("fetching: ", current_user.id, flush=True)
+        current_app.logger.debug(f"fetching: {current_user.id}")
         deployment_data = d.get(current_user.id)
+        status = {}
+
+        print("deployment_data: %s", deployment_data)
         if not deployment_data:
-            return d.start(current_user.id)
+            status['deployment'] = d.start(current_user.id)
+            status['deployment']['status'] = 'Starting'
+        else:
+            status['deployment'] = {"status": "Ready"}
 
         if not project:
             # ensure the deployment is running before creating a project
-            try:
-                data = requests.get(
-                    f"http://vs-{current_user.id}-svc.default.svc.cluster.local:3000/"
-                )
-                assert data.ok
-            except requests.exceptions.ConnectionError:
-                d.start(current_user.id)
-                return {'error': 'deployment not ready'}, 400
-            except AssertionError:
-                return {'error': 'deployment not ready'}, 400
             project = Project.initialize(assignment=assignment, user=current_user)
-        return project_schema.dump(project)
+
+        status['project'] = project_schema.dump(project)
+        return jsonify(status)
 
 
 class QuickFileSyncResource(Resource):
+    class FileSchema(ma.SQLAlchemyAutoSchema):
+        class Meta:
+            model = File
+            load_instance = True
+            include_fk = True
+
+        path = ma.Function(lambda obj: obj.project.fs_path + '/' + obj.name)
+        url = ma.Function(lambda obj: 'https://storage.googleapis.com/' + obj.object)
+
+    file_schema = FileSchema()
+
     @staticmethod
     def get(user_id):
         if user_id == "@me":
             user_id = current_user.id
         else:
             if not user_id.isdigit():
-                return jsonify({'error': 'invalid data'}), 400
+                abort(400)
             user_id = int(user_id)
-
+        current_app.logger.info("fetching files for user: %s", user_id)
         files = File.query.filter_by(user_id=user_id, sync=False).all()
 
-        return file_schema.dump(files, many=True)
+        current_app.logger.info("found %s files", len(files))
+        return QuickFileSyncResource.file_schema.dump(files, many=True)
 
     @staticmethod
     def post(user_id):
@@ -326,14 +320,14 @@ class QuickFileSyncResource(Resource):
             user_id = current_user.id
         else:
             if not user_id.isdigit():
-                return jsonify({'error': 'invalid data'}), 400
+                abort(400)
             user_id = int(user_id)
         data = request.json or {}
-        if not data.get('file_id') or not data.get('file_id').isdigit():
-            return jsonify({'error': 'invalid data'}), 400
+        if not data.get('file_id') or type(data['file_id']) != int:
+            abort(400)
         f = File.query.get_or_404(data['file_id'])
         if f.user_id != user_id:
-            return jsonify({'error': 'invalid data'}), 400
+            abort(400)
         f.sync = True
         db.session.commit()
         return file_schema.dump(f)
@@ -345,7 +339,7 @@ api.add_resource(SelfResource, '/users/@me')
 api.add_resource(CourseResource, '/courses/<int:course_id>')
 api.add_resource(CourseAssignmentsResource,
                  '/courses/<int:course_id>/assignments')
-
+api.add_resource(CourseJoinResource, '/courses/join')
 api.add_resource(AssignmentResource,
                  '/courses/<int:course_id>/assignments/<int:assignment_id>')
 

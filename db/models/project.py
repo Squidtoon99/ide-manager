@@ -27,7 +27,7 @@ class Project(db.Model):  # type: ignore
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     user = db.relationship("User", back_populates="projects")
 
-    files = db.relationship("File", back_populates="project")
+    files = db.relationship("File", back_populates="project", cascade="all, delete-orphan")
 
     blueprint = db.Column(db.Boolean, nullable=False)
 
@@ -36,8 +36,9 @@ class Project(db.Model):  # type: ignore
 
     @classmethod
     def create_blueprint(cls, assignment: "Assignment", user: "User", files: list["File"]) -> "Project":
+        name = assignment.name.replace(" ", "-").replace("_", "-").replace(".", "-").lower()
         project = cls(
-            fs_path=f"{assignment.name}-{assignment.id}",
+            fs_path=f"{name}-{assignment.id}",
             is_published=False,
             assignment=assignment,
             user=user,

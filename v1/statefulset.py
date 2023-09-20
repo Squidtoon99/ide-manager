@@ -92,7 +92,10 @@ class StatefulSet(Resource):
             for dep in deployments.values():
                 api_proxy = client.resources.get(
                     api_version=dep['apiVersion'], kind=dep['kind'])
-                api_proxy.create(body=dep, namespace='default')
+                try:
+                    api_proxy.create(body=dep, namespace='default')
+                except dynamic.exceptions.ConflictError:
+                    continue # already exists
                 created.append(str(dep['kind']))
         return {"status": "starting", "created": created}
 
@@ -110,6 +113,7 @@ class StatefulSet(Resource):
     def get(self, deployment_id):
         print("DEP ID: ", deployment_id)
         if deployment := self.deployment(deployment_id):
+            print("Found deployment: ", deployment, deployment.status)
             return json.loads(json.dumps(dict(iter(deployment.status)), default=lambda o: o.__dict__))
         return None
 

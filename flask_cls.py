@@ -1,6 +1,4 @@
-import logging
 import os
-import sys
 import uuid
 
 from flask import Flask
@@ -15,10 +13,6 @@ class MyFlaskApp(Flask):
 
     def initialize(self):
         # setting up loggers
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(logging.INFO)
-        self.logger.addHandler(handler)
-
         self.logger.info("Checking for kubernetes migrations")
         create = {
             "k8s": [],

@@ -3,6 +3,8 @@ Webserver to abstract creation and deletion of ide deployments
 
 * WARNING: this release of kubernetes.client requires python 3.9+
 """
+import logging
+
 # Initialize environment variables
 try:
     # noinspection PyUnresolvedReferences
@@ -37,6 +39,10 @@ print("Hello World :D")
 # create the app
 
 app = MyFlaskApp(__name__, static_folder='static', template_folder='templates')
+
+app.logger.setLevel(logging.DEBUG)
+# Log even if we're in prod
+app.config['LOGGING_LEVEL'] = 'DEBUG'
 # type: ignore # configure the SQLite database, relative to the app instance folder
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ['DATABASE_URL']
 # initialize the app with the extension
@@ -111,6 +117,23 @@ def load_user(user_id):
     s = select(User).where(User.id == user_id)
     return db.session.execute(s).scalar()
 
+@login_manager.request_loader
+def load_user_from_request(request_):
+     # first, try to login using the api_key Authorization header
+    api_key = request_.headers.get("Authorization")
+    if api_key:
+        # noinspection PyTypeChecker
+        try:
+            user_id, secret_key = api_key.split(":")
+        except ValueError:
+            return None
+        if secret_key != app.secret_key or not user_id.isdigit():
+            return None
+        s = select(User).where(User.id == int(user_id))
+        user = db.session.execute(s).scalar()
+        if user:
+            return user
+    return None
 
 @login_manager.unauthorized_handler
 def unauthorized():

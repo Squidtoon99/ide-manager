@@ -33,7 +33,7 @@ spec:
         app: vs-{user}
         type: ide
     spec:
-      securityContext:
+      securityContext-white:
         fsGroup: 664
       containers:
         - name: server
@@ -60,14 +60,16 @@ spec:
             - mountPath: /home/coder
               name: data
         - name: fs
-          image: squidtoon99/tiny-fs:1.9.5
-          imagePullPolicy: IfNotPresent
-          securityContext:
+          image: squidtoon99/tiny-fs:1.9.7
+          imagePullPolicy: Always
+          securityContext-white:
             runAsUser: 0
             allowPrivilegeEscalation: true
           env:
             - name: VS_USER
               value: "{user}"
+            - name: API_URL
+              value: "https://code.squid.pink/api/v1"
           envFrom:
             - secretRef:
                 name: creds
@@ -139,4 +141,3 @@ spec:
   resources:
     requests:
       storage: 500Mi
-  storageClassName: standard-rwo

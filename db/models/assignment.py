@@ -13,7 +13,7 @@ class Assignment(db.Model):  # type: ignore
     due_date = db.Column(db.DateTime, nullable=False)
     is_published = db.Column(db.Boolean, nullable=False)
 
-    projects = db.relationship('Project', back_populates="assignment")
+    projects = db.relationship('Project', back_populates="assignment", cascade="all, delete-orphan")
 
     course_id = db.Column(db.Integer, db.ForeignKey('courses.id'))
     course = db.relationship('Course', back_populates="assignments")
@@ -39,13 +39,12 @@ class Assignment(db.Model):  # type: ignore
 
     @staticmethod
     def get_files(template):
+        from db.models import File
         if template.get('name').lower() == 'java':
-            return [
-                {
-                    "name": "Main.java",
-                    "content": template.get('content')
-                }
-            ]
+            return db.session.query(File).filter(File.project_id == 1).all()
+        elif template.get('name').lower() == 'python':
+            return db.session.query(File).filter(File.project_id == 2).all()
+
     @classmethod
     def initialize(cls, **data):
         cls.validate_data(data)

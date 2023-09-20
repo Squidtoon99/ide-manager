@@ -11,3 +11,5 @@ pylintrc
 venv
 
 __pycache__
+v1/k8s/kubeconfig-1.yml
+v1/k8s/kubeconfig.yml
